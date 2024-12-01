@@ -28,4 +28,10 @@ public class Authenticate {
         }
     }
 
+    public boolean verify(String pass, String salt, String hashedPass){
+        String testHash = hashPass(pass, salt);
+        return testHash.equals(hashedPass);
+        // if done correctly returns true because algo is deterministic
+    }
+
 }
