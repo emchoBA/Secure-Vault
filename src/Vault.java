@@ -8,25 +8,47 @@ import java.util.Base64;
 
 public class Vault {
     private final String vaultPath;
+    private final Encryption enc = new Encryption();
+    private boolean isLocked;
     private final String KEY_HASH = "Hash";
 
     public Vault(String vaultPath) {
         this.vaultPath = vaultPath;
+        this.isLocked = true;
+    }
+
+    public void unlockVault(String pass) {
+        Authenticate aut = new Authenticate(vaultPath);
+        if (aut.verify(pass)) {
+            isLocked = false;
+            System.out.println("Vault unlocked successfully.");
+            return;
+        }
+        System.out.println("Vault could not be unlocked.");
+    }
+
+    public void lockVault() {
+        isLocked = true;
+        System.out.println("Vault locked successfully.");
     }
 
     public void saveEncFile(String fileName, byte[] data, SecretKey key) throws Exception {
+        if (isLocked) {
+            throw new IllegalStateException("Vault is locked. File cannot be loaded.");
+        }
+
         byte[] iv = new byte[16];
         new SecureRandom().nextBytes(iv);
         IvParameterSpec ivSpec = new IvParameterSpec(iv);
 
-        byte[] encData = new Encryption().encrypt(data, key, ivSpec);
+        byte[] encData = enc.encrypt(data, key, ivSpec);
 
         File encFile = new File(vaultPath + File.separator + fileName + ".enc");
         try (FileOutputStream fos = new FileOutputStream(encFile)) {
             fos.write(encData);
         }
 
-        String fileHash = computeHash(encData); //check if needed for plain version
+        String fileHash = computeHash(data); //check if needed for plain version
 
         System.out.println("IV: " + Base64.getEncoder().encodeToString(iv));
 
@@ -39,7 +61,11 @@ public class Vault {
         System.out.println("Encrypted file and metadata saved successfully.");
     }
 
-    public byte[] loadEncFile(String fileName, Encryption enc, SecretKey key) throws Exception {
+    public byte[] loadEncFile(String fileName, SecretKey key) throws Exception {
+        if(isLocked){
+            throw new IllegalStateException("Vault is locked. File cannot be loaded.");
+        }
+
         File encFile = new File(vaultPath + File.separator + fileName + ".enc");
         byte[] data = new byte[(int) encFile.length()];
         try (FileInputStream fis = new FileInputStream(encFile)) {

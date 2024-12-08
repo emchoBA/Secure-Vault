@@ -8,11 +8,12 @@ public class Main {
         String path = "D:\\vault";
 
         System.out.println("Authenticate");
-        Authenticate aut = new Authenticate();
+        Authenticate aut = new Authenticate(path);
         String salt = aut.generateSalt();
         String pass = "deneme";
-        String hashedPass = aut.hashPass(pass, salt);
-        boolean verify = aut.verify(pass, salt, hashedPass);
+        System.out.println("Salt: " + salt);
+        String hashedPass = aut.hashPass(pass, salt, true);
+        boolean verify = aut.verify(pass);
 
         System.out.println("Salt pass: " + hashedPass + " " + salt);
         System.out.println("Compare: " + verify);
@@ -47,10 +48,11 @@ public class Main {
             String fileName = "deneme";
             byte[] data = "deneme".getBytes();
             SecretKey key = enc.loadKey(path + "\\key.txt");
+            vault.unlockVault(pass);
 
             vault.saveEncFile(fileName, data, key);
             System.out.println("Key: " + key);
-            byte[] decData = vault.loadEncFile(fileName, enc, key);
+            byte[] decData = vault.loadEncFile(fileName, key);
             System.out.println("Data: " + new String(data) + " " + new String(decData));
             System.out.println("//////////////////////////");
 
