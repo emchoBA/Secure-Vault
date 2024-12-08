@@ -25,7 +25,7 @@ public class Encryption {
         }
      //!!!!USE PASSWORD DERIVATION FOR ENC KEY
 
-    public static IvParameterSpec genIv(){ // can be byte[] genIv()
+    public IvParameterSpec genIv(){ // can be byte[] genIv()
         byte[] iv = new byte[BLOCK_SIZE];
         new SecureRandom().nextBytes(iv); // like generating salt, cbc
         return new IvParameterSpec(iv);
@@ -45,13 +45,13 @@ public class Encryption {
         return new SecretKeySpec(key, ALGO);
     }
 
-    public static byte[] encrypt(byte[] data, SecretKey key, IvParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException { //can be String input
+    public byte[] encrypt(byte[] data, SecretKey key, IvParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException { //can be String input
         Cipher cipher = Cipher.getInstance(TRANSFORM);
         cipher.init(Cipher.ENCRYPT_MODE, key, iv);
         return cipher.doFinal(data);
     }
 
-    public static byte[] decrypt(byte[] data, SecretKey key, IvParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+    public byte[] decrypt(byte[] data, SecretKey key, IvParameterSpec iv) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
         Cipher cipher = Cipher.getInstance(TRANSFORM);
         cipher.init(Cipher.DECRYPT_MODE, key, iv);
         return cipher.doFinal(data);
