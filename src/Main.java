@@ -49,15 +49,18 @@ public class Main {
             byte[] data = "deneme".getBytes();
             SecretKey key = enc.loadKey(path + "\\key.txt");
             vault.unlockVault(pass);
+            vault.lockVault();
+            vault.unlockVault(pass);
 
-            vault.saveEncFile(fileName, data, key);
-            System.out.println("Key: " + key);
-            byte[] decData = vault.loadEncFile(fileName, key);
-            System.out.println("Data: " + new String(data) + " " + new String(decData));
-            System.out.println("//////////////////////////");
 
-            boolean verifyIntegrity = vault.verifyIntegrity(fileName, data);
-            System.out.println("Verify: " + verifyIntegrity);
+//            vault.saveEncFile(fileName, data, key);
+//            System.out.println("Key: " + key);
+//            byte[] decData = vault.loadEncFile(fileName, key);
+//            System.out.println("Data: " + new String(data) + " " + new String(decData));
+//            System.out.println("//////////////////////////");
+//
+//            boolean verifyIntegrity = vault.verifyIntegrity(fileName, decData);//do this with enc version
+//            System.out.println("Verify: " + verifyIntegrity);
         } catch (Exception e) {
             e.printStackTrace();
         }

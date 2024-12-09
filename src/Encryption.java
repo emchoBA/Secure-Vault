@@ -23,7 +23,6 @@ public class Encryption {
             keyG.init(KEY_SIZE);
             return keyG.generateKey();
         }
-     //!!!!USE PASSWORD DERIVATION FOR ENC KEY
 
     public IvParameterSpec genIv(){ // can be byte[] genIv()
         byte[] iv = new byte[BLOCK_SIZE];
