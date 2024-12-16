@@ -1,171 +1,302 @@
-import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
 import java.io.*;
 import java.nio.file.Files;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.Base64;
+import java.util.*;
 
 public class Vault {
-    private final String vaultPath;
-    private final Encryption enc = new Encryption();
+    private static final long BLOCK_SIZE = 512L * 1024L * 1024L; // 512 MB
+    private final String vaultPath;  // Single container file
+    private final String metaPath;   // Path to hashed password + salt metadata
+    private final Encryption enc;
+    private final Authenticate auth;
+    private Map<String, FileEntry> manifest;
+    private boolean unlocked;
+    private SecretKey activeKey;
 
-    private boolean isLocked;
-    private final String KEY_HASH = "Hash";
-
-
-    public Vault(String vaultPath) {
+    // Constructor
+    public Vault(String vaultPath, String metaPath) {
         this.vaultPath = vaultPath;
-        this.isLocked = false;
+        this.metaPath = metaPath;
+        this.enc = new Encryption();
+        this.auth = new Authenticate(metaPath);  // changed usage to store meta in metaPath
+        this.manifest = new HashMap<>();
+        this.unlocked = false;
     }
 
-    public void unlockVault(String pass) throws Exception {
-        if(!isLocked){
-            System.out.println("Vault is already unlocked.");
-        }else {
-            Authenticate aut = new Authenticate(vaultPath);
+    public void createVault(String password) {
+        try {
+            // Generate and store salted hash (plus store salt in meta file)
+            String salt = auth.generateSalt();
+            String hashedPass = auth.hashPass(password, salt, true);
 
-            if (aut.verify(pass)) {
-                //decryptVault();////////////////////
-                isLocked = false;
-                System.out.println("Vault unlocked successfully.");
+            // enc key
+            this.activeKey = enc.genKey();
+
+            // start with empty manifest
+            this.manifest.clear();
+
+            // Lock vault immediately, writing out an empty encrypted container
+            lockVault();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public boolean unlockVault(String password) {
+        try {
+            // Verify password against stored hash
+            if (!auth.verify(password)) {
+                return false;
+            }
+
+            this.activeKey = enc.loadKeyIfExistOrGen(metaPath);
+
+            // Decrypt the single container file if it exists
+            File vaultFile = new File(vaultPath);
+            if (!vaultFile.exists() || vaultFile.length() == 0) {
+                manifest.clear();
+                unlocked = true;
+                return true;
+            }
+
+            byte[] blob = Files.readAllBytes(vaultFile.toPath());
+            if (blob.length < 8) {
+                return false; // no header
+            }
+
+            long realLength = bytesToLong(Arrays.copyOfRange(blob, 0, 8));
+            long dataStart = 8;
+            long dataEnd = dataStart + realLength;
+
+            if (dataEnd > blob.length) {
+                return false; // invalid or corrupted
+            }
+
+            byte[] encryptedBytes = Arrays.copyOfRange(blob, (int)dataStart, (int)dataEnd);
+
+            byte[] decryptedBytes = enc.decryptContainer(encryptedBytes, activeKey);
+
+            // Deserialize the manifest
+            this.manifest = deserializeManifest(decryptedBytes);
+            if (this.manifest == null) {
+                // If something's wrong, treat as failed
+                return false;
+            }
+
+            unlocked = true;
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private static long bytesToLong(byte[] arr) {
+        try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(arr))) {
+            return dis.readLong();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return -1;
+        }
+    }
+
+    public void lockVault() {
+        if (!unlocked) {
+            System.out.println("Vault is already locked or not yet unlocked.");
+            return;
+        }
+        try {
+            // Serialize the manifest
+            byte[] serialized = serializeManifest(manifest);
+
+            // Encrypt the container
+            byte[] encryptedBytes = enc.encryptContainer(serialized, activeKey);
+
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+
+            // Write the length of the encrypted data as an 8-byte header
+            long realLength = encryptedBytes.length;
+            bos.write(longToBytes(realLength));
+
+            // Write the actual encrypted container data
+            bos.write(encryptedBytes);
+
+            // Calculate final container size in multiples of BLOCK_SIZE
+            long currentSize = 8 + realLength; // 8 for header
+            long blocksNeeded = (currentSize + BLOCK_SIZE - 1) / BLOCK_SIZE; // integer math rounding up
+            long targetSize = blocksNeeded * BLOCK_SIZE; // e.g., 512 MB, 1024 MB, etc.
+
+            long padSize = targetSize - currentSize;
+            if (padSize > 0) {
+                byte[] padding = new byte[(int) padSize];
+                new SecureRandom().nextBytes(padding);
+                bos.write(padding);
+            }
+
+            byte[] finalBlob = bos.toByteArray();
+
+            // Write container to disk
+            try (FileOutputStream fos = new FileOutputStream(vaultPath)) {
+                fos.write(finalBlob);
+            }
+
+            // Clear memory
+            manifest.clear();
+            unlocked = false;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static byte[] longToBytes(long x) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (DataOutputStream dos = new DataOutputStream(bos)) {
+            dos.writeLong(x);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return bos.toByteArray();
+    }
+
+    public void addFile(String filePath) {
+        if (!unlocked) {
+            System.out.println("Vault is locked. Unlock first.");
+            return;
+        }
+        try {
+            File f = new File(filePath);
+            if (!f.exists() || f.isDirectory()) {
+                System.out.println("Invalid file path.");
                 return;
             }
-            System.out.println("Vault could not be unlocked.");
+            String logicalName = f.getName();
+            byte[] fileData = Files.readAllBytes(f.toPath());
+
+            // Compute hash
+            String hash = computeHash(fileData);
+
+            // Store in manifest
+            FileEntry fe = new FileEntry(logicalName, fileData, hash);
+            manifest.put(logicalName, fe);
+
+            System.out.println("File added to vault: " + logicalName);
+        } catch (IOException | NoSuchElementException e) {
+            e.printStackTrace();
         }
     }
 
-    public void lockVault() throws Exception {
-        if(!isLocked){
-            //encryptVault();
-            isLocked = true;
-            System.out.println("Vault locked successfully.");
-        }else {
-            System.out.println("Vault is already locked.");
+    public void removeFile(String logicalName) {
+        if (!unlocked) {
+            System.out.println("Vault is locked. Unlock first.");
+            return;
+        }
+        if (manifest.containsKey(logicalName)) {
+            manifest.remove(logicalName);
+            System.out.println("File removed from vault: " + logicalName);
+        } else {
+            System.out.println("No file found with name: " + logicalName);
         }
     }
 
-    public void saveEncFile(String fileName, byte[] data, SecretKey key) throws Exception {
-        if (isLocked) {
-            throw new IllegalStateException("Vault is locked. File cannot be loaded.");
+    public void extractFile(String logicalName, String destinationPath) {
+        if (!unlocked) {
+            System.out.println("Vault is locked. Unlock first.");
+            return;
+        }
+        FileEntry fe = manifest.get(logicalName);
+        if (fe == null) {
+            System.out.println("File not found in vault.");
+            return;
         }
 
-        byte[] iv = new byte[16];
-        new SecureRandom().nextBytes(iv);
-        IvParameterSpec ivSpec = new IvParameterSpec(iv);
-
-        byte[] encData = enc.encrypt(data, key, ivSpec);
-
-        File encFile = new File(vaultPath + File.separator + fileName + ".enc");
-        try (FileOutputStream fos = new FileOutputStream(encFile)) {
-            fos.write(encData);
+        // verify integrity
+        String hashNow = computeHash(fe.getData());
+        if (!hashNow.equals(fe.getHash())) {
+            System.out.println("WARNING: File integrity check failed for " + logicalName);
+            return;
         }
 
-        String fileHash = computeHash(data); //do this with salted version
-
-        String metadata = "Original_File_Name:" + fileName + "\n" +
-                KEY_HASH+ ":" + fileHash + "\n" +
-                "IV:" + Base64.getEncoder().encodeToString(iv);
-
-        saveMeta(fileName, metadata);
-
-        System.out.println("Encrypted file and metadata saved successfully.");
-    }
-
-    public byte[] loadEncFile(String fileName, SecretKey key) throws Exception {
-        if(isLocked){
-            throw new IllegalStateException("Vault is locked. File cannot be loaded.");
+        // extract file
+        try (FileOutputStream fos = new FileOutputStream(destinationPath)) {
+            fos.write(fe.getData());
+            System.out.println("File extracted successfully to: " + destinationPath);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
 
-        File encFile = new File(vaultPath + File.separator + fileName + ".enc");
-        byte[] data = new byte[(int) encFile.length()];
-        try (FileInputStream fis = new FileInputStream(encFile)) {
-            int test = fis.read(data); // Put int test for testing purposes does not do anything
+        // add func to delete file
+    }
+
+    public void listFiles() {
+        if (!unlocked) {
+            System.out.println("Vault is locked. Unlock first.");
+            return;
         }
-
-        String meta = loadMeta(fileName);
-        String iv = extractMeta(meta, "IV");
-        IvParameterSpec ivSpec = new IvParameterSpec(Base64.getDecoder().decode(iv));
-        return enc.decrypt(data, key, ivSpec);
-    }
-
-    private String computeHash(byte[] data) throws NoSuchAlgorithmException {
-        MessageDigest mesDig = MessageDigest.getInstance("SHA-256");
-        byte[] hash = mesDig.digest(data);
-        return Base64.getEncoder().encodeToString(hash);
-    }
-    public boolean verifyIntegrity(String fileName, byte[] data) throws Exception{
-        //try to add salted version to computed hash
-        String currHash = computeHash(data);
-        String meta = loadMeta(fileName);
-        String storeHash = extractMeta(meta, KEY_HASH);
-        return currHash.equals(storeHash);
-    }
-
-    private void saveMeta(String fileName, String meta) throws IOException {
-        File metaFile = new File (vaultPath + File.separator + fileName + ".meta");
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(metaFile))) {
-            writer.write(meta);
+        if (manifest.isEmpty()) {
+            System.out.println("Vault is empty.");
+            return;
+        }
+        System.out.println("Files in vault:");
+        for (String logicalName : manifest.keySet()) {
+            System.out.println(" - " + logicalName);
         }
     }
 
-    private String loadMeta(String fileName) throws IOException {
-        File metaFile = new File(vaultPath + File.separator + fileName + ".meta");
-        StringBuilder meta = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new FileReader(metaFile))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                meta.append(line).append("\n");
-            }
-        }
-        return meta.toString().trim();
-    }
-
-    private String extractMeta(String meta, String key) {
-        String[] lines = meta.split("\n");
-        for (String line : lines) {
-            if (line.startsWith(key + ":")) {
-                return line.split(":", 2)[1];
-            }
-        }
-        return null;
-    }
-
-    private void encryptVault() throws Exception{
-        File vault = new File(vaultPath);
-        for(File file : vault.listFiles()){
-            if(!file.getName().endsWith(".enc") && !file.getName().equals("key.txt") && !file.getName().equals("hash.meta")){
-                byte[] fileData = Files.readAllBytes(file.toPath());
-                SecretKey key = enc.loadKey(vaultPath +"\\key.txt");
-                Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-                System.out.println("enc key: "+key);
-                cipher.init(Cipher.ENCRYPT_MODE, key);
-                byte[] encData = cipher.doFinal(fileData);
-                try(FileOutputStream fos = new FileOutputStream(file)) {
-                    fos.write(encData);
-                }
-            }
+    private String computeHash(byte[] data) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(data);
+            return Base64.getEncoder().encodeToString(digest);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
-    private void decryptVault() throws Exception{
-        File vault = new File(vaultPath);
-        for(File file : vault.listFiles()){
-            if(file.getName().endsWith(".enc") && !file.getName().equals("key.txt") && !file.getName().equals("hash.meta")){
-                byte[] fileData = Files.readAllBytes(file.toPath());
-                SecretKey key = enc.loadKey(vaultPath +"\\key.txt");
-                System.out.println(key);
-                Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-                cipher.init(Cipher.DECRYPT_MODE, key);
-                byte[] decData = cipher.doFinal(fileData);
-                try(FileOutputStream fos = new FileOutputStream(file)) {
-                    fos.write(decData);
-                }
-            }
+    // serialize manifest to bytes before encrypt
+    private byte[] serializeManifest(Map<String, FileEntry> manifest) {
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
+             ObjectOutputStream oos = new ObjectOutputStream(bos)) {
+            oos.writeObject(manifest);
+            return bos.toByteArray();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
         }
     }
 
+    // deserialize manifest bytes after decrypt
+    private Map<String, FileEntry> deserializeManifest(byte[] raw) {
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(raw);
+             ObjectInputStream ois = new ObjectInputStream(bis)) {
+            //noinspection unchecked
+            return (Map<String, FileEntry>) ois.readObject();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
 
+    // Simple getter
+    public boolean isUnlocked() {
+        return unlocked;
+    }
+
+    // inner class to hold raw data and hash
+    private static class FileEntry implements Serializable {
+        private final String fileName;
+        private final byte[] data;
+        private final String hash;
+
+        public FileEntry(String fileName, byte[] data, String hash) {
+            this.fileName = fileName;
+            this.data = data;
+            this.hash = hash;
+        }
+
+        public String getFileName() { return fileName; }
+        public byte[] getData() { return data; }
+        public String getHash() { return hash; }
+    }
 }

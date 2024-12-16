@@ -1,68 +1,97 @@
-import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
+import java.util.Scanner;
 
 public class Main {
 
-
     public static void main(String[] args) {
-        String path = "D:\\vault";
+        String vaultPath = "D:\\vault.sec";
+        String metaPath = "D:\\vault.meta";   // hashed pass, salt
 
-        System.out.println("Authenticate");
-        Authenticate aut = new Authenticate(path);
-        String salt = aut.generateSalt();
-        String pass = "deneme";
-        System.out.println("Salt: " + salt);
-        String hashedPass = aut.hashPass(pass, salt, true);
-        boolean verify = aut.verify(pass);
+        Scanner sc = new Scanner(System.in);
+        Vault vault = new Vault(vaultPath, metaPath);
 
-        System.out.println("Salt pass: " + hashedPass + " " + salt);
-        System.out.println("Compare: " + verify);
-        System.out.println("//////////////////////////");
+        while (true) {
+            System.out.println("\n--- Secure File Vault ---");
+            System.out.println("1. Create new vault");
+            System.out.println("2. Unlock vault");
+            System.out.println("3. Add file");
+            System.out.println("4. Remove file");
+            System.out.println("5. Extract file");
+            System.out.println("6. View files in vault");
+            System.out.println("7. Lock vault");
+            System.out.println("8. Exit");
+            System.out.print("Select an option: ");
 
-        System.out.println("Encryption");
-        Encryption enc = new Encryption();
-        IvParameterSpec iv = enc.genIv();
-        try {
-            SecretKey key = enc.genKey();
+            int choice;
+            try {
+                choice = Integer.parseInt(sc.nextLine());
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input, try again.");
+                continue;
+            }
 
-            enc.saveKey(key, path + "\\key.txt");
-            SecretKey key2 = enc.loadKey(path + "\\key.txt");
-            System.out.println("Key: " + key + " " + key2 + " " + iv);
-            System.out.println("//////////////////////////");
-
-            String data = "deneme";
-            System.out.println("iv" + iv);
-            byte[] encData = enc.encrypt(data.getBytes(), key, iv);
-            byte[] decData = enc.decrypt(encData, key, iv);
-            System.out.println("Data: " + data + " " + new String(decData));
-            System.out.println("//////////////////////////");
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        System.out.println("Vault");
-        Vault vault = new Vault(path);
-
-        try {
-            String fileName = "deneme";
-            byte[] data = "deneme".getBytes();
-            SecretKey key = enc.loadKey(path + "\\key.txt");
-            vault.unlockVault(pass);
-            vault.lockVault();
-            vault.unlockVault(pass);
-
-
-//            vault.saveEncFile(fileName, data, key);
-//            System.out.println("Key: " + key);
-//            byte[] decData = vault.loadEncFile(fileName, key);
-//            System.out.println("Data: " + new String(data) + " " + new String(decData));
-//            System.out.println("//////////////////////////");
-//
-//            boolean verifyIntegrity = vault.verifyIntegrity(fileName, decData);//do this with enc version
-//            System.out.println("Verify: " + verifyIntegrity);
-        } catch (Exception e) {
-            e.printStackTrace();
+            switch (choice) {
+                case 1:
+                    System.out.print("Enter vault password: ");
+                    String newPass = sc.nextLine();
+                    vault.createVault(newPass);
+                    System.out.println("Vault created and locked.");
+                    break;
+                case 2:
+                    System.out.print("Enter vault password: ");
+                    String unlockPass = sc.nextLine();
+                    if (vault.unlockVault(unlockPass)) {
+                        System.out.println("Vault unlocked successfully.");
+                    } else {
+                        System.out.println("Invalid password or vault metadata missing.");
+                    }
+                    break;
+                case 3:
+                    if (!vault.isUnlocked()) {
+                        System.out.println("Vault is locked. Unlock first.");
+                        break;
+                    }
+                    System.out.print("Enter file path to add: ");
+                    String pathToAdd = sc.nextLine();
+                    vault.addFile(pathToAdd);
+                    break;
+                case 4:
+                    if (!vault.isUnlocked()) {
+                        System.out.println("Vault is locked. Unlock first.");
+                        break;
+                    }
+                    System.out.print("Enter filename to remove (logical name in vault): ");
+                    String removeName = sc.nextLine();
+                    vault.removeFile(removeName);
+                    break;
+                case 5:
+                    if (!vault.isUnlocked()) {
+                        System.out.println("Vault is locked. Unlock first.");
+                        break;
+                    }
+                    System.out.print("Enter file name to extract: ");
+                    String extractName = sc.nextLine();
+                    System.out.print("Enter destination path for extracted file: ");
+                    String destPath = sc.nextLine();
+                    vault.extractFile(extractName, destPath);
+                    break;
+                case 6:
+                    if (!vault.isUnlocked()) {
+                        System.out.println("Vault is locked. Unlock first.");
+                        break;
+                    }
+                    vault.listFiles();
+                    break;
+                case 7:
+                    vault.lockVault();
+                    System.out.println("Vault locked.");
+                    break;
+                case 8:
+                    System.out.println("Exiting...");
+                    sc.close();
+                    return;
+                default:
+                    System.out.println("Invalid option. Try again.");
+            }
         }
     }
 }

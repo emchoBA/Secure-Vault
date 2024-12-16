@@ -2,79 +2,77 @@ import java.io.*;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
-public class Authenticate {
-    // I did this part using specifications from project file, such as hashing with salt and usage of AES-256
-    private static final int SALT_SIZE = 16;
-    // private static final int ITER = 1000; // for PBKDF2WithHmacSHA256
-    private static final String ALGO = "SHA-256";// change this to PBKDF2WithHmacSHA256
-    private final String path;
-    private String salt;
 
-    public Authenticate(String path) {
-        this.path = path;
+public class Authenticate {
+    private static final int SALT_SIZE = 16;
+    private static final String ALGO = "SHA-256";
+    private final String metaPath;
+
+    public Authenticate(String metaPath) {
+        this.metaPath = metaPath;
     }
-    //create salt for hashing
-    public String generateSalt(){
+
+    public String generateSalt() {
         SecureRandom scRand = new SecureRandom();
-        byte[] salt_arr = new byte[SALT_SIZE];
-        scRand.nextBytes(salt_arr); //create number of random bytes
-        String salt = Base64.getEncoder().encodeToString(salt_arr); // encodes bytes to string with base64 encoder
-        this.salt = salt;
-        return salt; // encodes bytes to string with base64 encoder
+        byte[] saltBytes = new byte[SALT_SIZE];
+        scRand.nextBytes(saltBytes);
+        return Base64.getEncoder().encodeToString(saltBytes);
     }
+
 
     public String hashPass(String pass, String salt, boolean store) {
         try {
-            MessageDigest mesDig = MessageDigest.getInstance(ALGO); // selected algorithm
-            mesDig.update(Base64.getDecoder().decode(salt)); // because MessageDigest works with binary
-            // update puts salt to hash input
-            byte[] hashedPass = mesDig.digest(pass.getBytes()); // turned to byte, hashed with salt
-            String hashedPassStr = Base64.getEncoder().encodeToString(hashedPass); // encodes bytes to string with base64 encoder
-            if(store){
-                storeInfo(hashedPassStr);
+            MessageDigest md = MessageDigest.getInstance(ALGO);
+            md.update(Base64.getDecoder().decode(salt));
+            byte[] hashedPassBytes = md.digest(pass.getBytes());
+            String hashedPassStr = Base64.getEncoder().encodeToString(hashedPassBytes);
+            if (store) {
+                storeCredentials(hashedPassStr, salt);
             }
-
             return hashedPassStr;
-
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    public boolean verify(String pass){
-        String info = loadInfo();
-        assert info != null;
-        String hashedPass = extractInfo(info, "Hash");
-        String saltVer = extractInfo(info, "Salt");
 
-        String testHash = hashPass(pass, saltVer, false);
-        return testHash.equals(hashedPass);
-        // if done correctly returns true because algo is deterministic
-    }
-
-    private void storeInfo(String hashedPass) throws Exception {
-        String hashPath = path + "\\hash.meta";
-        BufferedWriter writer = new BufferedWriter(new FileWriter(hashPath));
-        String fill = "Hash:" + hashedPass + "\n" + "Salt:" + salt;
-        writer.write(fill);
-        writer.close();
-    }
-
-    private String loadInfo() {
-        File hashFile = new File(path + "\\hash.meta");
-        if (hashFile.exists()) {
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new FileReader(hashFile))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    sb.append(line).append("\n");
-                }
-                return sb.toString().trim();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+    public boolean verify(String pass) {
+        try {
+            String info = loadCredentials();
+            if (info == null) {
+                return false;
             }
+            String storedHash = extractInfo(info, "Hash");
+            String storedSalt = extractInfo(info, "Salt");
+
+            // rehash pass with salt
+            String testHash = hashPass(pass, storedSalt, false);
+            return testHash.equals(storedHash);
+        } catch (Exception e) {
+            return false;
         }
-        return null;
+    }
+
+    private void storeCredentials(String hashedPass, String salt) throws IOException {
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(metaPath))) {
+            bw.write("Hash:" + hashedPass + "\n");
+            bw.write("Salt:" + salt + "\n");
+        }
+    }
+
+    private String loadCredentials() {
+        File f = new File(metaPath);
+        if (!f.exists()) return null;
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return sb.toString().trim();
     }
 
     private String extractInfo(String info, String key) {
@@ -86,5 +84,4 @@ public class Authenticate {
         }
         return null;
     }
-
 }
