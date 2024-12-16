@@ -78,14 +78,14 @@ public class Encryption {
             return new SecretKeySpec(keyBytes, ALGO);
         }
     }
-
+/**
     // trying single file vault appr
-    /** public IvParameterSpec genIv() {
+     public IvParameterSpec genIv() {
         byte[] iv = new byte[IV_SIZE];
         new SecureRandom().nextBytes(iv);
         return new IvParameterSpec(iv);
     }
-
+*/
     public byte[] encrypt(byte[] data, SecretKey key, IvParameterSpec iv)
             throws GeneralSecurityException {
         Cipher cipher = Cipher.getInstance(TRANSFORM);
@@ -100,5 +100,5 @@ public class Encryption {
         return cipher.doFinal(data);
     }
 
-     */
+
 }
