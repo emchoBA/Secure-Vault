@@ -38,10 +38,6 @@ public class Vault {
         this.unlocked = false;
     }
 
-    /**
-     * Creates a new vault: store salted hash of password, generate a new AES key,
-     * write an empty container (locked).
-     */
     public void createVault(String password) {
         try {
             String salt = auth.generateSalt();
@@ -56,9 +52,6 @@ public class Vault {
         }
     }
 
-    /**
-     * Unlock vault by verifying password and then reading the index from the container's end.
-     */
     public boolean unlockVault(String password) {
         try {
             if (!auth.verify(password)) {
@@ -68,7 +61,7 @@ public class Vault {
 
             File vaultFile = new File(vaultPath);
             if (!vaultFile.exists() || vaultFile.length() == 0) {
-                // brand new or empty container
+                // new or empty container
                 fileIndex.clear();
                 unlocked = true;
                 return true;
@@ -106,44 +99,6 @@ public class Vault {
                 return true;
             }
 
-            /**byte[] containerBytes = Files.readAllBytes(vaultFile.toPath());
-            if (containerBytes.length < 8) {
-                System.out.println("Container too small, no index header found.");
-                return false;
-            }
-
-            // Last 8 bytes = size of the encrypted index
-            int len = containerBytes.length;
-            byte[] indexSizeBytes = Arrays.copyOfRange(containerBytes, len - 8, len);
-            long encIndexSize = bytesToLong(indexSizeBytes);
-
-            if (encIndexSize <= 0 || encIndexSize > (len - 8)) {
-                System.out.println("Invalid or corrupted index size.");
-                return false;
-            }
-
-            // The encrypted index starts at (len - 8 - encIndexSize)
-            long encIndexOffset = len - 8 - encIndexSize;
-            if (encIndexOffset < 0) {
-                System.out.println("Corrupted container: negative index offset.");
-                return false;
-            }
-            byte[] encIndexBytes = Arrays.copyOfRange(containerBytes, (int)encIndexOffset, (int)(encIndexOffset + encIndexSize));
-
-            // Decrypt the index
-            byte[] decIndexBytes = enc.decryptContainer(encIndexBytes, activeKey);
-
-            // Deserialize
-
-            if (loadedIndex == null) {
-                System.out.println("Failed to deserialize index.");
-                return false;
-            }
-
-            this.fileIndex = loadedIndex;
-            this.unlocked = true;
-            return true;
-*/
         } catch (Exception e) {
             e.printStackTrace();
             return false;
@@ -152,8 +107,8 @@ public class Vault {
 
     /**
      *   1) For each file in fileIndex, read old offset/length from existing vault, append it in memory (one by one)
-     *   2) After appending all files, write an 8-byte header + encrypted index at the end
-     *   3) Pad up to specified size
+     *   2) Pad up to specified size
+     *   3) Write index and 8 byte header
      *   maybe make it so that it will round up !!!!!!!!!!!!!!!!!!!!!!!!!!!
      */
     public void lockVault() {
@@ -164,8 +119,7 @@ public class Vault {
         try (RandomAccessFile raf = new RandomAccessFile(vaultPath, "rw")) {
             raf.seek(raf.length());
 
-
-
+            ////// padding start
             long currentSize = raf.length();
             long desiredPaddedSize = BLOCK_SIZE;
 
@@ -175,6 +129,7 @@ public class Vault {
                 byte[] padding = new byte[(int)paddingSize];
                 new SecureRandom().nextBytes(padding);
                 raf.write(padding);
+            //////// padding end
             }else{
                 System.out.println("Container already at or above " + desiredPaddedSize + " bytes.");
             }
@@ -183,7 +138,7 @@ public class Vault {
             byte[] serializedIndex = serializeIndex(fileIndex);
             byte[] encryptedIndex = enc.encryptContainer(serializedIndex, activeKey);
 
-            // Write the encrypted index size and the index itself
+            // write index and header
             raf.write(encryptedIndex);
             raf.write(longToBytes(encryptedIndex.length));
 
@@ -197,16 +152,7 @@ public class Vault {
         }
     }
 
-
-    /**
-     * Add a file to the in-memory vault. We store only metadata (offset, length) after we actually append
-     * in lockVault(). For now, we generate random IV, encrypt the file, and store the ciphertext offset= -1
-     * until lockVault() re-builds.
-     *
-     * Instead, let's do a direct append approach, but let's keep consistent with the final solution:
-     * We'll append the file data immediately to the existing container. Then update fileIndex with the offset, length.
-     */
-    // could cause memory errors with big size files because store encrypted data in memory
+    // go to the end -> append enc data -> update index
     // check other alternatives
     public void addFile(String filePath) {
         if (!unlocked) {
@@ -230,7 +176,7 @@ public class Vault {
 
             raf.write(encryptedData);
 
-            // Update index
+            // update index
             FileRecord record = new FileRecord(offset, encryptedData.length, iv, computeHash(plainData));
             fileIndex.put(file.getName(), record);
 
@@ -254,10 +200,11 @@ public class Vault {
         }
     }
 
-    /**
-     * Extract a file from the vault. We read the container, decrypt the correct offset. If rec.cipherData != null,
-     * we can skip reading from disk. But let's do the final approach from disk to confirm offsets are correct.
-     */
+    // !extract using offset!
+    // header -> get index
+    // index -> get offset
+    // offset -> read file
+    // offset ile tam konumu buluyoruz
     public void extractFile(String logicalName, String destinationPath) {
         if (!unlocked) {
             System.out.println("Vault is locked. Unlock first.");
@@ -281,15 +228,17 @@ public class Vault {
 
             Files.write(new File(destinationPath).toPath(), decryptedData);
             System.out.println("File extracted successfully to: " + destinationPath);
+
+            //for removing after exract
+            removeFile(logicalName);
+            System.out.println("File successfully removed: " + logicalName);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
 
-    /**
-     * List files currently in memory. After unlock, fileIndex is populated.
-     */
+    // files in memory
     public void listFiles() {
         if (!unlocked) {
             System.out.println("Vault is locked. Unlock first.");
@@ -304,36 +253,11 @@ public class Vault {
             System.out.println(" - " + logicalName);
         }
     }
-/**
 
-     * Expose file names for a GUI method.
-
-    public Set<String> getFileNames() {
-        if (!unlocked) return Collections.emptySet();
-        return Collections.unmodifiableSet(fileIndex.keySet());
-    }
-*/
     public boolean isUnlocked() {
         return unlocked;
     }
 
-    // --------------------------------------
-    // Internal Helpers
-    // --------------------------------------
-
-    /**
-     * Read a region from a byte array (the old container) at 'offset' and length 'length'.
-
-    private byte[] readRegion(byte[] container, long offset, long length) {
-        if (offset < 0 || length < 0 || (offset + length) > container.length) {
-            throw new IllegalArgumentException("Invalid offset/length in readRegion. Container might be corrupted.");
-        }
-        return Arrays.copyOfRange(container, (int)offset, (int)(offset + length));
-    }
-*/
-    /**
-     * Compute SHA-256 hash of data (Base64-encoded).
-     */
     private String computeHash(byte[] data) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -344,7 +268,7 @@ public class Vault {
         }
     }
 
-    private byte[] serializeIndex(Map<String, FileRecord> index) {
+    private byte[] serializeIndex(Map<String, FileRecord> index) { // turn to byte
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
              ObjectOutputStream oos = new ObjectOutputStream(bos)) {
             oos.writeObject(index);
@@ -386,24 +310,23 @@ public class Vault {
         }
     }
 
-    /**
-     * FileRecord: offset, length, IV, hash, plus a transient `cipherData` for files added but not locked.
-     */
-    private static class FileRecord implements Serializable {
-        long offset;  // Offset in container (valid after lockVault)
-        long length;  // Length of encrypted data
-        byte[] iv;    // 16-byte IV
-        String hash;  // Base64-encoded SHA-256 of plaintext
 
-        // Transient storage for in-memory encrypted data if not locked yet
-        transient byte[] cipherData;
+    // offset, length, IV, hash for each file
+
+    // ??? maybe use transient for cipher data ???
+    // transient for files temporary or should not be saved, sensitive
+
+    private static class FileRecord implements Serializable {
+        long offset;  // offset in container (valid after lockVault)
+        long length;  // length of encrypted data
+        byte[] iv;    // 16 byte IV
+        String hash;  // Base64 encoded SHA-256 of plaintext
 
         public FileRecord(long offset, long length, byte[] iv, String hash) {
             this.offset = offset;
             this.length = length;
             this.iv = iv;
             this.hash = hash;
-            this.cipherData = null;
         }
     }
 }
