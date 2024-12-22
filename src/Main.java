@@ -34,7 +34,7 @@ public class Main {
                     System.out.print("Enter vault password: ");
                     String newPass = sc.nextLine();
                     vault.createVault(newPass);
-                    System.out.println("Vault created and locked.");
+                    System.out.println("Done.");
                     break;
                 case 2:
                     System.out.print("Enter vault password: ");

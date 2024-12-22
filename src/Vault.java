@@ -29,7 +29,13 @@ public class Vault {
     }
 
     public void createVault(String password) {
+        File vaultFile = new File(vaultPath);
+        if (vaultFile.exists()) {
+            System.out.println("Vault already exists. Creation aborted.");
+            return;
+        }
         try {
+
             String salt = auth.generateSalt();
             auth.hashPass(password, salt, true);
 
