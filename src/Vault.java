@@ -6,26 +6,16 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.*;
 
-/**
- * A reliable single-container "mini-archive" approach:
- * Container layout:
- *   [ all appended encrypted file data in sequence ]
- *   [ 8-byte header: size of the encrypted index ]
- *   [ encrypted index bytes (Map<String, FileRecord>) ]
- *
- * This avoids corruption when multiple files are added.
- */
 public class Vault {
-    private static final long BLOCK_SIZE = 512L * 1024L * 1024L; // Round container size to 512 MB
+    private static final long BLOCK_SIZE = 512L * 1024L * 1024L; // pad to this size
     private final String vaultPath;
     private final String metaPath;
     private final Encryption enc;
     private final Authenticate auth;
 
-    // fileIndex: Maps logical filename -> FileRecord (offset, length, iv, hash)
+    // fileIndex: maps filename -> FileRecord (offset, length, iv, hash)
     private Map<String, FileRecord> fileIndex;
 
-    // State
     private boolean unlocked;
     private SecretKey activeKey;
 
